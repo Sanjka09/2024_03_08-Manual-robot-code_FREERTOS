@@ -129,6 +129,7 @@ osThreadId myTask04Handle;
 osThreadId myTask05Handle;
 osThreadId myTask06Handle;
 osThreadId myTask07Handle;
+osThreadId myTask08Handle;
 /* USER CODE BEGIN PV */
 double PI = 3.14159;
 double power;			//joysticknii hodolson zai (robotiin hurd)
@@ -192,21 +193,29 @@ int switchStatePrev_6;
 int space = 6;
 int space_1 = 3;
 int i=0;
+int ii = 10000;
+int can_flag=0;
+int can_time;
+double M_can_pos;
+int M_can_target;
 
 PID_Variables M1_pid;
 PID_Variables M2_pid;
 PID_Variables M3_pid;
 PID_Variables M4_pid;
+PID_Variables M5_pid;
+PID_Variables M5_pos_pid;
 
 motor_variables M1;
 motor_variables M2;
 motor_variables M3;
 motor_variables M4;
+motor_variables M5;
 
 uint32_t TxMailbox;
 uint8_t TxData[8];
 uint8_t RxData[8];
-uint16_t speed;
+int16_t speed;
 
 char m1_hurd[4][max];
 char flag[6]={0,0,0,0,0,0} ;
@@ -242,6 +251,7 @@ void Wheel_task(void const * argument);
 void Encoder_task(void const * argument);
 void Display_task(void const * argument);
 void Ros_Transmit(void const * argument);
+void M3508_task(void const * argument);
 
 /* USER CODE BEGIN PFP */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
@@ -326,6 +336,9 @@ int main(void)
     M4_pid.KP=0.47799;
     M4_pid.KI=0.0;
     M4_pid.KD=0.10;
+
+
+
     setup();
   /* USER CODE END 2 */
 
@@ -374,6 +387,10 @@ int main(void)
   osThreadDef(myTask07, Ros_Transmit, osPriorityNormal, 0, 512);
   myTask07Handle = osThreadCreate(osThread(myTask07), NULL);
 
+  /* definition and creation of myTask08 */
+  osThreadDef(myTask08, M3508_task, osPriorityNormal, 0, 256);
+  myTask08Handle = osThreadCreate(osThread(myTask08), NULL);
+
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
@@ -420,7 +437,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 216;
+  RCC_OscInitStruct.PLL.PLLN = 200;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 3;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -442,9 +459,9 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV16;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_7) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_6) != HAL_OK)
   {
     Error_Handler();
   }
@@ -466,13 +483,13 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 6;
+  hcan1.Init.Prescaler = 5;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_5TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_6TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
   hcan1.Init.AutoRetransmission = ENABLE;
   hcan1.Init.ReceiveFifoLocked = DISABLE;
@@ -483,25 +500,26 @@ static void MX_CAN1_Init(void)
   }
   /* USER CODE BEGIN CAN1_Init 2 */
   CAN_FilterTypeDef sFilterConfig;
-    sFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
-    sFilterConfig.FilterBank = 12;
-    sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
-    sFilterConfig.FilterIdHigh = 0x200 << 5;
-    sFilterConfig.FilterIdLow = 0x200;
-    sFilterConfig.FilterMaskIdHigh = 0;
-    sFilterConfig.FilterMaskIdLow = 0;
+    sFilterConfig.FilterBank = 0;
     sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
     sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-    sFilterConfig.SlaveStartFilterBank = 13;
+    sFilterConfig.FilterIdHigh = 0x205;
+    sFilterConfig.FilterIdLow = 0x200;
+    sFilterConfig.FilterMaskIdHigh = 0x0000;
+    sFilterConfig.FilterMaskIdLow = 0x0000;
+    sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+    sFilterConfig.FilterActivation = ENABLE;
+    sFilterConfig.SlaveStartFilterBank = 14;
+    if (HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK) {
+      	Error_Handler();
+    }
 
-    if(HAL_CAN_ConfigFilter(&hcan1, &sFilterConfig) != HAL_OK){
-    	Error_Handler();
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+      	Error_Handler();
     }
-    if(HAL_CAN_Start(&hcan1) != HAL_OK){
-    	Error_Handler();
-    }
-    if(HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK){
-    	Error_Handler();
+
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
+      	Error_Handler();
     }
   /* USER CODE END CAN1_Init 2 */
 
@@ -1390,19 +1408,31 @@ void yvj_ergeh(){
 	motor3();
 	motor4();
 }
+int GetPos_M5(){
+	return M_can_pos/1000;
+}
+
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan){
 	if(HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, RxData) == HAL_OK){
 		if(rxHeader.StdId == 0x201){
-			if(i < 100000){
-				i++;
-			}else{
-				i=0;
-			}
-			speed = RxData[2] << 8;
-			speed = speed  + RxData[3];
-			speed = speed * 1.5;
+			int can_prev_time=can_time;
+			can_time=HAL_GetTick();
+			double delta_time=can_time-can_prev_time;
+			can_flag=1;
+//			if(i < 100000){
+//				i++;
+//			}else{
+//				i=0;
+//			}
+			M5.en_speed = RxData[2] << 8;
+			M5.en_speed = M5.en_speed  + RxData[3];
+			delta_time=delta_time*M5.en_speed;
+//			speed = speed * 1.5;ss
+			M_can_pos=M_can_pos+(delta_time/198);
+//			HAL_GetTick();
 		}
 	}
+
 }
 void can_transmit(CAN_HandleTypeDef* hcan, uint16_t id, int16_t msg1){
     CAN_TxHeaderTypeDef tx_header;
@@ -1436,51 +1466,65 @@ void Joystick_task(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, RESET);	//SPI chip select
-		HAL_SPI_TransmitReceive(&hspi1, TX, RX, 9, 10); //full duplexeer medeelel avah RX deer hadgalah
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10,SET);
-		if(comma == 0){
-			y=left_y*7.8125;//(128-RX[8])*7.8125;
-			x=left_x*7.8125;//(RX[7]-128)*7.8125;
-			r=right_x*1.828593664;//(RX[5]-128);
-		}
+//		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, RESET);	//SPI chip select
+//		HAL_SPI_TransmitReceive(&hspi1, TX, RX, 9, 10); //full duplexeer medeelel avah RX deer hadgalah
+//		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10,SET);
+//		if(comma == 0){
+//			y=left_y*7.8125;//(128-RX[8])*7.8125;
+//			x=left_x*7.8125;//(RX[7]-128)*7.8125;
+//			r=right_x*1.828593664;//(RX[5]-128);
+//		}
+//
+//		else if(comma == 10){
+//			y=(128-RX[8])*2.62467;//(128-RX[8])*7.8125;
+//			x=(RX[7]-128)*2.62467;//(RX[7]-128)*7.8125;
+//			r=(RX[5]-128);//(RX[5]-128);
+//		}
+//		else if(RX[3] == 254){
+//			y=(128-RX[8])*7.8125;//(128-RX[8])*2.62467;
+//			x=(RX[7]-128)*7.8125;//(RX[7]-128)*2.62467;
+//			r=(RX[5]-128);//(RX[5]-128);
+//		}
+//
+//
+//		power = hypot(x,y);
+//		if(power>1000){
+//			power=1000;
+//		}
+//		alpha = atan2(y,x);
+//		ML = sin(alpha-PI/4)*power;
+//		MR = cos(alpha-PI/4)*power;
+//
+//		M1.setpoint=MR;
+//		M2.setpoint=ML;
+//		M3.setpoint=ML;
+//		M4.setpoint=MR;
+//		if(can_flag==1){
+//			can_flag=0;
+//			can_transmit(&hcan1, FIRST_GROUP_ID, 0);
+	  M_can_target=0;
+	  osDelay(1000);
+	  M_can_target=-11;
+	  osDelay(5000);
+	  M_can_target=-6;
+	  osDelay(5000);
 
-		else if(comma == 10){
-			y=(128-RX[8])*2.62467;//(128-RX[8])*7.8125;
-			x=(RX[7]-128)*2.62467;//(RX[7]-128)*7.8125;
-			r=(RX[5]-128);//(RX[5]-128);
-		}
-		else if(RX[3] == 254){
-			y=(128-RX[8])*7.8125;//(128-RX[8])*2.62467;
-			x=(RX[7]-128)*7.8125;//(RX[7]-128)*2.62467;
-			r=(RX[5]-128);//(RX[5]-128);
-		}
+//			ii=ii-20;
+//		}
+//		osDelay(10);
 
 
-		power = hypot(x,y);
-		if(power>1000){
-			power=1000;
-		}
-		alpha = atan2(y,x);
-		ML = sin(alpha-PI/4)*power;
-		MR = cos(alpha-PI/4)*power;
-
-		M1.setpoint=MR;
-		M2.setpoint=ML;
-		M3.setpoint=ML;
-		M4.setpoint=MR;
-		can_transmit(&hcan1, FIRST_GROUP_ID, 10000);
-		osDelay(2000);
-		can_transmit(&hcan1, FIRST_GROUP_ID, 0);
-		osDelay(2000);
-		can_transmit(&hcan1, FIRST_GROUP_ID, -10000);
-		osDelay(2000);
-		can_transmit(&hcan1, FIRST_GROUP_ID, 0);
-		osDelay(2000);
-		if(i%1000 == 0){
-			HAL_GPIO_TogglePin(blue_user_led_GPIO_Port, blue_user_led_Pin);
-		}else
-			HAL_GPIO_TogglePin(blue_user_led_GPIO_Port, blue_user_led_Pin);
+//		can_transmit(&hcan1, FIRST_GROUP_ID, 0);
+//		osDelay(2000);
+//		can_transmit(&hcan1, FIRST_GROUP_ID, -10000);
+//		osDelay(2000);
+//		can_transmit(&hcan1, FIRST_GROUP_ID, 0);
+//		osDelay(2000);
+//		if(i%1000 == 0){
+//			HAL_GPIO_TogglePin(blue_user_led_GPIO_Port, blue_user_led_Pin);
+//		}else
+//			HAL_GPIO_TogglePin(blue_user_led_GPIO_Port, blue_user_led_Pin);
+//		osDelay(1);
 //    osDelay(30);
   }
   /* USER CODE END 5 */
@@ -1693,7 +1737,7 @@ void Seedling_task(void const * argument)
 	  		  TIM12->CCR2=50;
 	  	  }
 
-    osDelay(1);
+    osDelay(10);
   }
   /* USER CODE END Seedling_task */
 }
@@ -1766,7 +1810,7 @@ void Wheel_task(void const * argument)
 			  }
 	  }
 
-    osDelay(1);
+    osDelay(10);
   }
   /* USER CODE END Wheel_task */
 }
@@ -1836,7 +1880,7 @@ void Encoder_task(void const * argument)
 		motor_speed();
 
 
-        osDelay(10);
+        osDelay(1);
   }
   /* USER CODE END Encoder_task */
 }
@@ -1995,7 +2039,7 @@ void Display_task(void const * argument)
 			GUI_DrawRectangle(x_g[3], y_g[4]+space, x_g[5], y_g[8]-space, BLACK, DRAW_FULL, DOT_PIXEL_DFT);
 		}
 
-    osDelay(1);
+    osDelay(10);
   }
   /* USER CODE END Display_task */
 }
@@ -2067,6 +2111,44 @@ void Ros_Transmit(void const * argument)
     osDelay(5);
   }
   /* USER CODE END Ros_Transmit */
+}
+
+/* USER CODE BEGIN Header_M3508_task */
+/**
+* @brief Function implementing the myTask08 thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_M3508_task */
+void M3508_task(void const * argument)
+{
+  /* USER CODE BEGIN M3508_task */
+    M5_pid.KP=1.5;
+    M5_pid.KI=0.000;
+    M5_pid.KD=0.02;
+    M5_pos_pid.KP=1.5;
+    M5_pos_pid.KI=0;
+    M5_pos_pid.KD=0;
+  /* Infinite loop */
+  for(;;)
+  {
+	M5_pos_pid.error=M_can_target*1000-M_can_pos;
+	M5.setpoint=M5_pos_pid.KP*M5_pos_pid.error;
+	if(M5.setpoint>8000){
+		M5.setpoint=8000;
+	}
+	if(M5.setpoint<-8000){
+		M5.setpoint=-8000;
+	}
+	  M5_pid.error=M5.setpoint-M5.en_speed;
+	  M5_pid.I_error+=M5_pid.error;
+	  M5_pid.D_error=M5_pid.lasterror-M5_pid.error;
+	  M5_pid.lasterror=M5_pid.error;
+	  M5.Out=M5_pid.KP*M5_pid.error+M5_pid.KI*M5_pid.I_error+M5_pid.KD*M5_pid.D_error;
+	  can_transmit(&hcan1, FIRST_GROUP_ID, M5.Out);
+	  osDelay(2);
+  }
+  /* USER CODE END M3508_task */
 }
 
 /**
